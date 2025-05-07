@@ -8,7 +8,7 @@ edition = "2021"
 [dependencies]
 dotenv = "0.15.0"
 cen = { path = "../cen" }
-ash = "0.38.0+1.3.281"
+ash = "0.38.0"
 bytemuck = "1.21.0"
 egui = "0.30.0"
 gpu-allocator = "0.27.0"
