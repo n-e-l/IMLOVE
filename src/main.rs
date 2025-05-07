@@ -9,7 +9,6 @@ use cen::graphics::Renderer;
 use cen::graphics::renderer::RenderComponent;
 use cen::vulkan::CommandBuffer;
 use dotenv::dotenv;
-use egui::Widget;
 use crate::editor::Editor;
 
 struct Application {

@@ -11,6 +11,7 @@ cen = { path = "../cen" }
 ash = "0.38.0"
 bytemuck = "1.21.0"
 egui = "0.30.0"
+egui_dock = "0.16"
 gpu-allocator = "0.27.0"
 glam = { version = "0.29.2", features = ["bytemuck"] }
 ordered-float = "4.6.0"
