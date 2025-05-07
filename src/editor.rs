@@ -1,0 +1,26 @@
+use cen::app::gui::GuiComponent;
+use egui::Context;
+
+pub struct Editor {
+
+}
+
+impl Editor {
+    pub(crate) fn new() -> Editor {
+        Editor {}
+    }
+}
+
+impl Editor {
+
+}
+
+impl GuiComponent for Editor {
+    fn gui(&mut self, context: &Context) {
+        egui::Window::new("Nodes")
+            .resizable(true)
+            .title_bar(true)
+            .show(context, |_| {
+            });
+    }
+}

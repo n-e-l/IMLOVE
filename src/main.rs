@@ -1,3 +1,5 @@
+mod editor;
+
 use std::sync::{Arc, Mutex};
 use ash::vk::{Image, ImageView};
 use cen::app::App;
@@ -7,30 +9,25 @@ use cen::graphics::Renderer;
 use cen::graphics::renderer::RenderComponent;
 use cen::vulkan::CommandBuffer;
 use dotenv::dotenv;
+use egui::Widget;
+use crate::editor::Editor;
 
 struct Application {
+    editor: Editor
 }
 
 impl Application {
 
     fn new() -> Application {
         Self {
+            editor: Editor::new()
         }
     }
 }
 
 impl GuiComponent for Application {
     fn gui(&mut self, context: &egui::Context) {
-
-        // Gui code
-        context.input(|_| {
-        });
-
-        egui::Window::new("Nodes")
-            .resizable(true)
-            .title_bar(true)
-            .show(context, |_| {
-            });
+        self.editor.gui(context);
     }
 }
 
