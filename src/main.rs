@@ -25,7 +25,7 @@ impl Application {
 }
 
 impl GuiComponent for Application {
-    fn gui(&mut self, context: &egui::Context) {
+    fn gui(&mut self, context: &egui_dock::egui::Context) {
         self.editor.gui(context);
     }
 }
