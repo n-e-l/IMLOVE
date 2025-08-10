@@ -10,6 +10,7 @@ dotenv = "0.15.0"
 cen = { path = "../cen" }
 #cen = "0.0.6"
 ash = "0.38.0"
-egui = "0.30.0"
-egui_dock = "0.15"
+gpu-allocator = { version = "0.27.0" }
+egui = "0.32.0"
+egui_dock = "0.17"
 image = { version = "0.25", features = ["png"] }
