@@ -109,9 +109,9 @@ impl RenderComponent for Editor {
             BufferUsageFlags::TRANSFER_SRC | BufferUsageFlags::TRANSFER_DST
         );
 
-        let map = buf.mapped();
+        let mut map = buf.mapped().unwrap();
         let pixel_data = im.as_bytes();
-        unsafe { std::ptr::copy_nonoverlapping(pixel_data.as_ptr(), map.as_mut_ptr(), pixel_data.len()); }
+        unsafe { std::ptr::copy_nonoverlapping(pixel_data.as_ptr(), map.as_mut_slice().as_mut_ptr(), pixel_data.len()); }
 
         self.image = Some(Image::new(
             &renderer.device,
