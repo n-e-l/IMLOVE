@@ -53,7 +53,7 @@ fn main() {
             .width(1180)
             .height(1180)
             .log_fps(true)
-            .vsync(true),
+            .vsync(false),
         application.clone(),
         Some(application.clone())
     );
