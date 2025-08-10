@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use ash::vk::{Image, ImageView};
 use cen::app::App;
 use cen::app::app::AppConfig;
-use cen::app::gui::GuiComponent;
+use cen::app::gui::{GuiComponent, GuiSystem};
 use cen::graphics::Renderer;
 use cen::graphics::renderer::RenderComponent;
 use cen::vulkan::CommandBuffer;
@@ -25,16 +25,21 @@ impl Application {
 }
 
 impl GuiComponent for Application {
-    fn gui(&mut self, context: &egui_dock::egui::Context) {
-        self.editor.gui(context);
+    fn initialize_gui(&mut self, gui: &mut GuiSystem) {
+        self.editor.initialize_gui(gui);
+    }
+    fn gui(&mut self, gui: &GuiSystem, context: &egui_dock::egui::Context) {
+        self.editor.gui(gui, context);
     }
 }
 
 impl RenderComponent for Application {
-    fn initialize(&mut self, _: &mut Renderer) {
+    fn initialize(&mut self, renderer: &mut Renderer) {
+        self.editor.initialize(renderer);
     }
 
-    fn render(&mut self, _: &mut Renderer, _: &mut CommandBuffer, _: &Image, _: &ImageView) {
+    fn render(&mut self, renderer: &mut Renderer, cb: &mut CommandBuffer, i: &Image, iv: &ImageView) {
+        self.editor.render(renderer, cb, i, iv);
     }
 }
 

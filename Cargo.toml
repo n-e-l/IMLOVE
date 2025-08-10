@@ -7,7 +7,9 @@ edition = "2021"
 
 [dependencies]
 dotenv = "0.15.0"
-cen = "0.0.5"
+cen = { path = "../cen" }
+#cen = "0.0.6"
 ash = "0.38.0"
-egui = "0.31.1"
+egui = "0.30.0"
 egui_dock = "0.15"
+image = { version = "0.25", features = ["png"] }
