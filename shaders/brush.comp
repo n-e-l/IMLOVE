@@ -1,0 +1,23 @@
+#version 450
+
+layout ( local_size_x = 16, local_size_y = 16, local_size_z = 1 ) in;
+
+layout( binding = 0, rgba8 ) uniform image2D image;
+
+layout( push_constant ) uniform PushConstants
+{
+    vec2 cursor;
+} constants;
+
+void main()
+{
+    ivec2 p = ivec2( gl_GlobalInvocationID.xy );
+    ivec2 screenSize = imageSize( image );
+
+    if( length(p - constants.cursor) < 150 )
+    {
+        vec4 c = imageLoad(image, p);
+        imageStore(image, p, vec4(1) - c);
+    }
+
+}
