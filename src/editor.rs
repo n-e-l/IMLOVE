@@ -6,7 +6,8 @@ use cen::app::gui::{GuiComponent, GuiSystem};
 use cen::graphics::Renderer;
 use cen::graphics::renderer::RenderComponent;
 use cen::vulkan::{Buffer, CommandBuffer, ComputePipeline, DescriptorSetLayout, Image};
-use egui::{ImageSize, ImageSource, Pos2, Rect, Scene, TextureId, Vec2, Widget};
+use egui::{ImageSize, ImageSource, Key, Pos2, Rect, Response, Scene, Sense, TextureId, Vec2, Widget};
+use egui::emath::TSTransform;
 use egui::load::SizedTexture;
 use egui_dock::{DockArea, DockState, NodeIndex, Style};
 use gpu_allocator::MemoryLocation;
@@ -45,7 +46,11 @@ struct TabViewer {
     texture_id: TextureId,
     texture_size: Vec2,
     scene_rect: Rect,
+    last_image_pointer: Vec2,
     image_pointer: Vec2,
+    pointer_down: bool,
+    pointer_held: bool,
+    space_down: bool,
     compute: bool
 }
 
@@ -68,16 +73,25 @@ impl egui_dock::TabViewer for TabViewer {
                     // Read where we are on the image
                     let frame_rect = ui.min_rect();
                     let mouse_frame_pos = p - frame_rect.min;
+                    self.last_image_pointer = mouse_frame_pos;
                     self.image_pointer = mouse_frame_pos / frame_rect.size() * self.scene_rect.size() + self.scene_rect.min.to_vec2();
                 }
+
+                self.pointer_held = input.pointer.any_down() && self.pointer_down;
+                self.pointer_down = input.pointer.any_down();
+                self.space_down = input.key_down(Key::Space);
             });
 
             egui::Frame::group(ui.style())
                 .inner_margin(0.0)
                 .show(ui, |ui| {
-                    let scene = Scene::new()
+                    let mut scene = Scene::new()
                         .max_inner_size([350.0, 1000.0])
                         .zoom_range(0.1..=30.0);
+
+                    if !self.space_down {
+                        scene = scene.sense(Sense::focusable_noninteractive());
+                    }
 
                     let mut inner_rect = Rect::NAN;
                     let response = scene
@@ -110,7 +124,11 @@ impl GuiComponent for Editor {
             texture_id: self.texture_id.unwrap(),
             scene_rect: Rect::ZERO,
             texture_size: Vec2::new(self.image.as_ref().unwrap().width as f32, self.image.as_ref().unwrap().height as f32),
+            last_image_pointer: Default::default(),
             image_pointer: Default::default(),
+            pointer_down: false,
+            pointer_held: false,
+            space_down: false,
             compute: false
         });
     }
@@ -233,6 +251,10 @@ impl RenderComponent for Editor {
     }
 
     fn render(&mut self, renderer: &mut Renderer, command_buffer: &mut CommandBuffer, swapchain_image: &ash::vk::Image, swapchain_image_view: &ImageView) {
+
+        if !self.tab_viewer.as_ref().unwrap().pointer_down || self.tab_viewer.as_ref().unwrap().space_down {
+            return;
+        }
 
         // if !self.tab_viewer.as_ref().unwrap().compute {
         //     return;

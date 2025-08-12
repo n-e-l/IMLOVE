@@ -14,10 +14,15 @@ void main()
     ivec2 p = ivec2( gl_GlobalInvocationID.xy );
     ivec2 screenSize = imageSize( image );
 
-    if( length(p - constants.cursor) < 150 )
+    float l = length(vec2(p) - constants.cursor);
+    float range = 15.;
+    if( l < range )
     {
+        float t = l / range;
+        t = sqrt(t);
         vec4 c = imageLoad(image, p);
-        imageStore(image, p, vec4(1) - c);
+        vec4 new_c = c * t + vec4(1, 0, 0, 1) * (1. - t);
+        imageStore(image, p, new_c);
     }
 
 }
