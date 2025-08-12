@@ -59,15 +59,16 @@ struct TabViewer {
     pointer_released: bool,
     space_down: bool,
     compute: bool,
-    okhsl: Okhsl
+    okhsl: Okhsl,
+    okhsl_h_32: f32,
 }
 
 impl TabViewer {
     fn multi_color_gradient_slider(
         ui: &mut egui::Ui,
-        value: &mut f64,
-        range: std::ops::RangeInclusive<f64>,
-        colors: &[egui::Color32]
+        value: &mut f32,
+        range: RangeInclusive<f32>,
+        colors: &[Color32]
     ) {
         if colors.is_empty() {
             // Fallback to regular slider if no colors provided
@@ -84,66 +85,44 @@ impl TabViewer {
 
         if colors.len() == 1 {
             // Single color - just fill with that color
-            painter.rect_filled(gradient_rect, egui::Rounding::same(4), colors[0]);
+            painter.rect_filled(gradient_rect, 2, colors[0]);
         } else {
             // Multi-color gradient
-            let segments = colors.len() - 1;
+            let segments = colors.len();
             let segment_width = gradient_rect.width() / segments as f32;
 
             for i in 0..segments {
-                let x_start = gradient_rect.min.x + i as f32 * segment_width;
-                let x_end = gradient_rect.min.x + (i + 1) as f32 * segment_width;
-
-                let start_color = colors[i];
-                let end_color = colors[i + 1];
-
-                let segment_rect = egui::Rect::from_x_y_ranges(
-                    x_start..=x_end,
-                    gradient_rect.y_range()
+                painter.rect_filled(
+                    Rect {
+                        min: gradient_rect.min + Vec2::new(segment_width * i as f32, 0.0),
+                        max: gradient_rect.min + Vec2::new(segment_width * i as f32 + segment_width, gradient_rect.height())},
+                    2,
+                    colors[i]
                 );
-
-                // Create mesh for this segment
-                let mut mesh = egui::Mesh::default();
-                let idx = mesh.vertices.len() as u32;
-
-                mesh.vertices.push(egui::epaint::Vertex {
-                    pos: egui::pos2(x_start, gradient_rect.min.y),
-                    uv: egui::pos2(0.0, 0.0),
-                    color: start_color,
-                });
-                mesh.vertices.push(egui::epaint::Vertex {
-                    pos: egui::pos2(x_end, gradient_rect.min.y),
-                    uv: egui::pos2(1.0, 0.0),
-                    color: end_color,
-                });
-                mesh.vertices.push(egui::epaint::Vertex {
-                    pos: egui::pos2(x_end, gradient_rect.max.y),
-                    uv: egui::pos2(1.0, 1.0),
-                    color: end_color,
-                });
-                mesh.vertices.push(egui::epaint::Vertex {
-                    pos: egui::pos2(x_start, gradient_rect.max.y),
-                    uv: egui::pos2(0.0, 1.0),
-                    color: start_color,
-                });
-
-                mesh.indices.extend_from_slice(&[idx, idx + 1, idx + 2, idx, idx + 2, idx + 3]);
-                painter.add(egui::Shape::mesh(mesh));
             }
         }
+
 
         // Add border
         painter.rect_stroke(gradient_rect, egui::Rounding::same(4),
                             egui::Stroke::new(1.0, egui::Color32::GRAY), StrokeKind::Inside);
 
-        // Place transparent slider on top
-        let layout = egui::Layout::left_to_right(egui::Align::Center);
-        ui.allocate_ui_with_layout(rect.size(), layout, |ui| {
-            ui.style_mut().visuals.widgets.inactive.bg_fill = egui::Color32::TRANSPARENT;
-            ui.style_mut().visuals.widgets.hovered.bg_fill = egui::Color32::TRANSPARENT;
-            ui.style_mut().visuals.widgets.active.bg_fill = egui::Color32::TRANSPARENT;
-            ui.add_sized(rect.size(), egui::Slider::new(value, range).show_value(false));
+        ui.scope(|ui| {
+            // Override the style to force minimum size
+            ui.style_mut().spacing.slider_width = rect.width();
+            ui.style_mut().spacing.interact_size.x = rect.width();
+
+            ui.add(Slider::new(value, range).show_value(false));
         });
+
+        // Place transparent slider on top
+        // let layout = egui::layout::left_to_right(egui::align::left);
+        // ui.allocate_ui_with_layout(rect.size(), layout, |ui| {
+        //     ui.style_mut().visuals.widgets.inactive.bg_fill = egui::color32::transparent;
+        //     ui.style_mut().visuals.widgets.hovered.bg_fill = egui::color32::transparent;
+        //     ui.style_mut().visuals.widgets.active.bg_fill = egui::color32::transparent;
+        //     ui.add_sized(rect.size(), egui::slider::new(value, range).show_value(true));
+        // });
     }
 }
 
@@ -157,11 +136,36 @@ impl egui_dock::TabViewer for TabViewer {
     fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab) {
         if tab == "tools" {
             ui.label("H");
-            ui.add(Slider::new(&mut self.okhsl.h, RangeInclusive::new(0.0, 1.0) ));
+            let mut colors = vec![];
+            for i in 0..20 {
+                let hsl = Okhsl { h: i as f64 / 19., s: self.okhsl.s, l: self.okhsl.l };
+                let rgb = hsl.to_srgb();
+                colors.push(Color32::from_rgb(rgb.r, rgb.g, rgb.b));
+            }
+            Self::multi_color_gradient_slider(ui, &mut self.okhsl_h_32, RangeInclusive::new(0., 1.0), colors.as_slice() );
+            self.okhsl.h = self.okhsl_h_32 as f64;
             ui.label("S");
-            ui.add(Slider::new(&mut self.okhsl.s, RangeInclusive::new(0.0, 1.0) ));
+            let mut colors = vec![];
+            for i in 0..20 {
+                let hsl = Okhsl { h: self.okhsl.h, s: i as f32 / 19., l: self.okhsl.l };
+                let rgb = hsl.to_srgb();
+                colors.push(Color32::from_rgb(rgb.r, rgb.g, rgb.b));
+            }
+            Self::multi_color_gradient_slider(ui, &mut self.okhsl.s, RangeInclusive::new(0., 1.0), colors.as_slice() );
             ui.label("L");
-            ui.add(Slider::new(&mut self.okhsl.l, RangeInclusive::new(0.0, 1.0) ));
+            let mut colors = vec![];
+            for i in 0..20 {
+                let hsl = Okhsl { h: self.okhsl.h, s: self.okhsl.s, l: i as f32 / 19. };
+                let rgb = hsl.to_srgb();
+                colors.push(Color32::from_rgb(rgb.r, rgb.g, rgb.b));
+            }
+            Self::multi_color_gradient_slider(ui, &mut self.okhsl.l, RangeInclusive::new(0., 1.0), colors.as_slice() );
+
+            let rgb = self.okhsl.to_srgb();
+            let width = ui.available_width();
+            let (rect, _) = ui.allocate_exact_size(Vec2 { x: width, y: 60. }, egui::Sense::hover());
+            let painter = ui.painter();
+            painter.rect_filled(rect, 2, Color32::from_rgb(rgb.r, rgb.g, rgb.b));
         }
 
         if tab == "view" {
@@ -234,7 +238,8 @@ impl GuiComponent for Editor {
                 h: 1.0,
                 s: 1.0,
                 l: 1.0,
-            }
+            },
+            okhsl_h_32: 1.0
         });
     }
 
@@ -511,9 +516,18 @@ impl RenderComponent for Editor {
         command_buffer.bind_pipeline(pipeline);
 
         let rgb = self.tab_viewer.as_ref().unwrap().okhsl.to_srgb();
+        let mut rgba = [rgb.r as f32 / 255.0, rgb.g as f32 / 255.0, rgb.b as f32 / 255.0, 1.0];
+        for i in 0..3 {
+            if (rgba[i] <= 0.04045f32) {
+                rgba[i] =  rgba[i] / 12.92f32;
+            } else {
+                rgba[i] = ((rgba[i] + 0.055f32) / 1.055f32).powf( 2.4f32);
+            }
+        }
+
         let push_constants = PushConstants {
             cursor: self.tab_viewer.as_ref().unwrap().image_pointer,
-            color: [rgb.r as f32 / 255.0, rgb.g as f32 / 255.0, rgb.b as f32 / 255.0, 1.0]
+            color: rgba
         };
         command_buffer.push_constants(pipeline, ShaderStageFlags::COMPUTE, 0, &bytemuck::cast_slice(std::slice::from_ref(&push_constants)));
 
