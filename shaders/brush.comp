@@ -3,9 +3,12 @@
 layout ( local_size_x = 16, local_size_y = 16, local_size_z = 1 ) in;
 
 layout( binding = 0, rgba8 ) uniform image2D image;
+layout( binding = 1, rgba8 ) uniform image2D draw_image;
+layout( binding = 2, rgba8 ) uniform image2D stencil_buffer;
 
 layout( push_constant ) uniform PushConstants
 {
+    vec4 color;
     vec2 cursor;
 } constants;
 
@@ -15,14 +18,18 @@ void main()
     ivec2 screenSize = imageSize( image );
 
     float l = length(vec2(p) - constants.cursor);
-    float range = 15.;
+    float range = 150.;
     if( l < range )
     {
-        float t = l / range;
-        t = sqrt(t);
-        vec4 c = imageLoad(image, p);
-        vec4 new_c = c * t + vec4(1, 0, 0, 1) * (1. - t);
-        imageStore(image, p, new_c);
+        float t = 1 - (l / range);
+        vec4 stencil = imageLoad(stencil_buffer, p);
+        if( t > stencil.r ) {
+            vec4 c = imageLoad(image, p);
+            vec4 new_c = c * (1. - t) + constants.color * t;
+            imageStore(draw_image, p, new_c);
+            imageStore(stencil_buffer, p, vec4(t, 0, 0, 0));
+        }
+
     }
 
 }

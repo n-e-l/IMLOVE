@@ -15,3 +15,4 @@ egui = "0.32.0"
 egui_dock = "0.17"
 image = { version = "0.25", features = ["png"] }
 bytemuck = "1.21.0"
+okhsl = "1.0.1"
