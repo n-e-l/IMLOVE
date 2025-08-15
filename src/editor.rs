@@ -52,8 +52,8 @@ struct TabViewer {
     texture_id: TextureId,
     texture_size: Vec2,
     scene_rect: Rect,
-    last_image_pointer: Vec2,
     image_pointer: Vec2,
+    image_pointer_prev: Vec2,
     pointer_down: bool,
     pointer_held: bool,
     pointer_released: bool,
@@ -174,8 +174,8 @@ impl egui_dock::TabViewer for TabViewer {
                 if let Some(p) = input.pointer.hover_pos() {
                     // Read where we are on the image
                     let frame_rect = ui.min_rect();
+                    self.image_pointer_prev = self.image_pointer;
                     let mouse_frame_pos = p - frame_rect.min;
-                    self.last_image_pointer = mouse_frame_pos;
                     self.image_pointer = mouse_frame_pos / frame_rect.size() * self.scene_rect.size() + self.scene_rect.min.to_vec2();
                 }
 
@@ -227,8 +227,8 @@ impl GuiComponent for Editor {
             texture_id: self.texture_id.unwrap(),
             scene_rect: Rect::ZERO,
             texture_size: Vec2::new(self.image.as_ref().unwrap().width as f32, self.image.as_ref().unwrap().height as f32),
-            last_image_pointer: Default::default(),
             image_pointer: Default::default(),
+            image_pointer_prev: Default::default(),
             pointer_down: false,
             pointer_held: false,
             pointer_released: false,
@@ -254,7 +254,8 @@ impl GuiComponent for Editor {
 #[derive(Copy, Clone, Pod, Zeroable)]
 struct PushConstants {
     color: [f32; 4],
-    cursor: Vec2,
+    cursor_a: Vec2,
+    cursor_b: Vec2,
 }
 
 impl RenderComponent for Editor {
@@ -437,11 +438,11 @@ impl RenderComponent for Editor {
 
             // Clear brush stencil
 
-            // command_buffer.clear_color_image(
-            //     self.stencil_buffer.as_ref().unwrap(),
-            //     ImageLayout::GENERAL,
-            //     [0.0, 0.0, 0.0, 1.0]
-            // );
+            command_buffer.clear_color_image(
+                self.stencil_buffer.as_ref().unwrap(),
+                ImageLayout::GENERAL,
+                [0.0, 0.0, 0.0, 1.0]
+            );
 
             // Copy the draw buffer into the image buffer
 
@@ -526,7 +527,8 @@ impl RenderComponent for Editor {
         }
 
         let push_constants = PushConstants {
-            cursor: self.tab_viewer.as_ref().unwrap().image_pointer,
+            cursor_a: self.tab_viewer.as_ref().unwrap().image_pointer_prev,
+            cursor_b: self.tab_viewer.as_ref().unwrap().image_pointer,
             color: rgba
         };
         command_buffer.push_constants(pipeline, ShaderStageFlags::COMPUTE, 0, &bytemuck::cast_slice(std::slice::from_ref(&push_constants)));

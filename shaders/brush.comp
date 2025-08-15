@@ -9,24 +9,32 @@ layout( binding = 2, rgba8 ) uniform image2D stencil_buffer;
 layout( push_constant ) uniform PushConstants
 {
     vec4 color;
-    vec2 cursor;
+    vec2 cursor_a;
+    vec2 cursor_b;
 } constants;
+
+float line_segment(in vec2 p, in vec2 a, in vec2 b) {
+    vec2 ba = b - a;
+    vec2 pa = p - a;
+    float h = clamp(dot(pa, ba) / dot(ba, ba), 0., 1.);
+    return length(pa - h * ba);
+}
 
 void main()
 {
     ivec2 p = ivec2( gl_GlobalInvocationID.xy );
     ivec2 screenSize = imageSize( image );
 
-    float l = length(vec2(p) - constants.cursor);
-    float range = 150.;
+    float l = line_segment(vec2(p), constants.cursor_a, constants.cursor_b);
+    float range = 50.;
     if( l < range )
     {
         float t = 1 - (l / range);
         vec4 stencil = imageLoad(stencil_buffer, p);
         if( t > stencil.r ) {
             vec4 c = imageLoad(image, p);
-//            vec4 new_c = c * (1. - t) + constants.color * t;
-            vec4 new_c = constants.color;
+            vec4 new_c = c * (1. - t) + constants.color * t;
+            //vec4 new_c = constants.color;
             imageStore(draw_image, p, new_c);
             imageStore(stencil_buffer, p, vec4(t, 0, 0, 0));
         }
