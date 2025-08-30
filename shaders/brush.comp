@@ -11,6 +11,9 @@ layout( push_constant ) uniform PushConstants
     vec4 color;
     vec2 cursor_a;
     vec2 cursor_b;
+    vec2 weight_1;
+    vec2 weight_2;
+    int shader_tool;
 } constants;
 
 float line_segment(in vec2 p, in vec2 a, in vec2 b) {
@@ -20,25 +23,109 @@ float line_segment(in vec2 p, in vec2 a, in vec2 b) {
     return length(pa - h * ba);
 }
 
-void main()
+void circ(ivec2 p)
 {
-    ivec2 p = ivec2( gl_GlobalInvocationID.xy );
-    ivec2 screenSize = imageSize( image );
+//    float l = distance(constants.weight_1, p);
+//    if( l > 20. && l < 30. ) {
+//        vec4 c = constants.color;
+//        imageStore(draw_image, p, c);
+//    }
 
-    float l = line_segment(vec2(p), constants.cursor_a, constants.cursor_b);
-    float range = 50.;
-    if( l < range )
+    float min_dist = 99999.;
+    int count = 10;
+    for(int i=0; i<=count; i++)
     {
-        float t = 1 - (l / range);
+        vec2 np = constants.weight_1 + (constants.weight_2 - constants.weight_1) / (count) * i;
+        float l = distance(p, np);
+        l = abs( l - (25. + i * 20. ) );
+        min_dist = min(l, min_dist);
+    }
+
+    vec4 old_c = imageLoad(image, p);
+    vec4 c = constants.color / ( min_dist / 100. );
+    c = abs(old_c - c);
+    imageStore(draw_image, p, c);
+}
+
+void geo(ivec2 p)
+{
+//    t = min(1., t);
+
+    vec2 inp = constants.weight_1 + constants.weight_2;
+    inp += 00. * vec2(cos(constants.weight_1.x * 9999.), sin(constants.weight_2.y * 99999.));
+    inp /= 2.;
+
+    float t = 99999.;
+    t = min(line_segment(p, constants.weight_1, inp), t);
+    t = min(line_segment(p, inp, constants.weight_2), t);
+    t = 20. / t;
+
+    vec4 old_c = imageLoad(image, p);
+    vec4 c = constants.color;
+    c = old_c * (1. - t) + t * c;
+    imageStore(draw_image, p, c);
+}
+
+void cone(ivec2 p)
+{
+    float l = line_segment(vec2(p), constants.weight_1, constants.weight_2);
+    float t1 = distance(vec2(p), constants.weight_1);
+    float t2 = distance(vec2(p), constants.weight_2);
+
+    float a = line_segment(vec2(p), constants.cursor_a, constants.cursor_b);
+    float range = 50.;
+//    if( l < range )
+    {
+        float t = 1 - (l / t1);
         vec4 stencil = imageLoad(stencil_buffer, p);
+
         if( t > stencil.r ) {
             vec4 c = imageLoad(image, p);
-            vec4 new_c = c * (1. - t) + constants.color * t;
+//            vec4 new_c = c * (1. - t) + constants.color * t;
+            vec4 new_c = abs(c - constants.color * t );
             //vec4 new_c = constants.color;
             imageStore(draw_image, p, new_c);
             imageStore(stencil_buffer, p, vec4(t, 0, 0, 0));
         }
 
     }
+}
 
+void balls(ivec2 p)
+{
+    float l = line_segment(vec2(p), constants.weight_1, constants.weight_2);
+    float t1 = distance(vec2(p), constants.weight_1);
+    float t2 = distance(vec2(p), constants.weight_2);
+
+    float t = t1 * t2 / 40000.;
+
+    float range = 20.;
+    if( t < range )
+    {
+        vec4 stencil = imageLoad(stencil_buffer, p);
+
+        vec4 c = imageLoad(image, p);
+
+                                vec4 new_c = c * (1. - t) + constants.color * t;
+//        vec4 new_c = abs(c - constants.color * t);
+        new_c.a = 1.0;
+        //vec4 new_c = constants.color;
+        imageStore(draw_image, p, new_c);
+        imageStore(stencil_buffer, p, vec4(t, 0, 0, 0));
+
+    }
+}
+
+void main()
+{
+    ivec2 p = ivec2( gl_GlobalInvocationID.xy );
+    ivec2 screenSize = imageSize( image );
+
+    switch(constants.shader_tool)
+    {
+        case 0: cone(p); break;
+        case 1: circ(p); break;
+        case 2: geo(p); break;
+        case 3: balls(p); break;
+    }
 }

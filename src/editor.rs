@@ -1,5 +1,7 @@
 use std::collections::HashMap;
+use std::fmt::format;
 use std::ops::{Range, RangeInclusive};
+use std::path::Path;
 use ash::vk;
 use ash::vk::{AccessFlags, BufferImageCopy, BufferUsageFlags, DescriptorSet, DescriptorSetLayoutBinding, DescriptorType, DeviceSize, ImageAspectFlags, ImageCopy, ImageLayout, ImageSubresourceLayers, ImageUsageFlags, ImageView, Offset3D, PipelineStageFlags, PushConstantRange, Sampler, ShaderStageFlags, WriteDescriptorSet};
 use bytemuck::{Pod, Zeroable};
@@ -8,18 +10,21 @@ use cen::graphics::pipeline_store::{PipelineConfig, PipelineKey};
 use cen::graphics::Renderer;
 use cen::graphics::renderer::RenderComponent;
 use cen::vulkan::{Buffer, CommandBuffer, ComputePipeline, DescriptorSetLayout, Image};
-use egui::{Color32, ImageSize, ImageSource, Key, Pos2, Rect, Response, Scene, Sense, Slider, StrokeKind, TextureId, Vec2, Widget};
+use egui::{Button, Color32, ImageSize, ImageSource, Key, Pos2, Rect, Response, Scene, Sense, Slider, Stroke, StrokeKind, TextureId, Vec2, Widget};
+use egui::debug_text::print;
 use egui::ecolor::Hsva;
 use egui::emath::TSTransform;
 use egui::load::SizedTexture;
 use egui_dock::{DockArea, DockState, NodeIndex, Style};
 use gpu_allocator::MemoryLocation;
-use image::{EncodableLayout, GenericImageView};
+use image::{EncodableLayout, GenericImageView, RgbaImage};
 use okhsl::Okhsl;
+use crate::editor::Tool::{Draw, Weight};
 
 pub struct Editor {
     pub tree: DockState<String>,
     image: Option<Image>,
+    orig_image: Option<Image>,
     texture_id: Option<TextureId>,
     tab_viewer: Option<TabViewer>,
     pipeline: Option<PipelineKey>,
@@ -40,6 +45,7 @@ impl Editor {
             tree,
             texture_id: None,
             image: None,
+            orig_image: None,
             draw_buffer: None,
             stencil_buffer: None,
             pipeline: None,
@@ -52,15 +58,30 @@ struct TabViewer {
     texture_id: TextureId,
     texture_size: Vec2,
     scene_rect: Rect,
+    view_rect: Rect,
     image_pointer: Vec2,
     image_pointer_prev: Vec2,
     pointer_down: bool,
     pointer_held: bool,
     pointer_released: bool,
+    reset_image: bool,
     space_down: bool,
     compute: bool,
     okhsl: Okhsl,
     okhsl_h_32: f32,
+    shader_tool: u32,
+    current_tool: Tool,
+    weight_pos: Vec<Pos2>,
+    in_scene: bool,
+    shift_down: bool,
+    export_image: bool,
+    merge: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Tool {
+    Draw,
+    Weight
 }
 
 impl TabViewer {
@@ -135,6 +156,13 @@ impl egui_dock::TabViewer for TabViewer {
 
     fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab) {
         if tab == "tools" {
+
+            self.reset_image = ui.button("reset").clicked();
+            self.export_image = ui.button("export").clicked();
+            self.merge = ui.button("merge").clicked();
+
+            ui.separator();
+
             ui.label("H");
             let mut colors = vec![];
             for i in 0..20 {
@@ -166,6 +194,30 @@ impl egui_dock::TabViewer for TabViewer {
             let (rect, _) = ui.allocate_exact_size(Vec2 { x: width, y: 60. }, egui::Sense::hover());
             let painter = ui.painter();
             painter.rect_filled(rect, 2, Color32::from_rgb(rgb.r, rgb.g, rgb.b));
+
+            ui.separator();
+
+            let mut draw_button = Button::new("Draw");
+            if self.current_tool == Draw { draw_button = draw_button.selected(true); }
+            if ui.add(draw_button).clicked() {
+                self.current_tool = Draw;
+            }
+            let mut weight_button = Button::new("Weight");
+            if self.current_tool == Weight { weight_button = weight_button.selected(true); }
+            if ui.add(weight_button).clicked() {
+                self.current_tool = Weight;
+            }
+
+            ui.separator();
+
+            ui.checkbox(&mut self.compute, "Compute");
+
+            for i in 0..10 {
+                let button = Button::new(format!("Tool {}", i))
+                    .selected(self.shader_tool == i);
+                if ui.add(button).clicked() { self.shader_tool = i; }
+            }
+
         }
 
         if tab == "view" {
@@ -183,9 +235,11 @@ impl egui_dock::TabViewer for TabViewer {
                 self.pointer_down = input.pointer.primary_down();
                 self.pointer_released = input.pointer.primary_released();
                 self.space_down = input.key_down(Key::Space);
+                self.merge = self.merge || input.key_pressed(Key::Enter);
+                self.shift_down = input.modifiers.shift;
             });
 
-            egui::Frame::group(ui.style())
+            let group = egui::Frame::group(ui.style())
                 .inner_margin(0.0)
                 .show(ui, |ui| {
                     let mut scene = Scene::new()
@@ -204,13 +258,44 @@ impl egui_dock::TabViewer for TabViewer {
                                 size: self.texture_size
                             })).ui(ui);
                             inner_rect = ui.min_rect();
+
+                            // Draw weights
+                            let painter = ui.painter();
+                            let weight_size = 10.;
+                            for p in &self.weight_pos {
+                                let rect = Rect { min: Pos2 { x: -weight_size, y: -weight_size } / 2. + p.to_vec2(), max: Pos2 { x: weight_size, y: weight_size } / 2. + p.to_vec2() };
+                                painter.rect_stroke(rect, 0, Stroke::new(1., Color32::from_rgb(255, 255, 255)), StrokeKind::Inside);
+                            }
                         })
                         .response;
 
                     if response.double_clicked() {
                         self.scene_rect = inner_rect;
                     }
+
                 });
+
+            self.view_rect = group.response.rect;
+            self.in_scene = false;
+            ui.input(|input| {
+                if let Some(pos) = input.pointer.latest_pos() {
+                    self.in_scene = self.view_rect.contains(pos);
+                }
+
+                if self.current_tool == Weight {
+
+                    if self.in_scene {
+                        if input.pointer.primary_pressed() {
+                            self.weight_pos[ 0 ] = self.image_pointer.to_pos2();
+                        }
+
+                        if input.pointer.primary_down() {
+                            self.weight_pos[ 1 ] = self.image_pointer.to_pos2();
+                        }
+                    }
+                }
+            });
+
         }
     }
 }
@@ -224,22 +309,31 @@ impl GuiComponent for Editor {
         }
 
         self.tab_viewer = Some(TabViewer {
+            in_scene: false,
             texture_id: self.texture_id.unwrap(),
             scene_rect: Rect::ZERO,
+            view_rect: Rect::ZERO,
             texture_size: Vec2::new(self.image.as_ref().unwrap().width as f32, self.image.as_ref().unwrap().height as f32),
+            shader_tool: 0,
             image_pointer: Default::default(),
             image_pointer_prev: Default::default(),
             pointer_down: false,
             pointer_held: false,
             pointer_released: false,
             space_down: false,
+            shift_down: false,
             compute: false,
+            merge: false,
+            reset_image: false,
+            export_image: false,
             okhsl: Okhsl {
                 h: 1.0,
                 s: 1.0,
                 l: 1.0,
             },
-            okhsl_h_32: 1.0
+            okhsl_h_32: 1.0,
+            current_tool: Draw,
+            weight_pos: vec![ Pos2 { x: 100., y: 100. }, Pos2 { x: 200., y: 100.} ],
         });
     }
 
@@ -256,6 +350,9 @@ struct PushConstants {
     color: [f32; 4],
     cursor_a: Vec2,
     cursor_b: Vec2,
+    weight_a: Vec2,
+    weight_b: Vec2,
+    shader_tool: u32,
 }
 
 impl RenderComponent for Editor {
@@ -300,7 +397,14 @@ impl RenderComponent for Editor {
         }).unwrap());
 
         // Load image from disk
-        let im = image::open("./black.png").expect("Couldn't load image").to_rgba8();
+        let mut im = image::open("./output.png").expect("Couldn't load image").to_rgba8();
+        for pixel in im.pixels_mut() {
+            for v in pixel.0.as_mut_slice() {
+                let mut fv = *v as f32 / 255.0;
+                fv = fv.powf(2.2);
+                *v = (fv * 255.0) as u8;
+            }
+        }
         let width = im.width();
         let height = im.height();
 
@@ -322,9 +426,17 @@ impl RenderComponent for Editor {
             &mut renderer.allocator,
             im.width(),
             im.height(),
-            ImageUsageFlags::STORAGE | ImageUsageFlags::SAMPLED | ImageUsageFlags::TRANSFER_DST
+            ImageUsageFlags::STORAGE | ImageUsageFlags::SAMPLED | ImageUsageFlags::TRANSFER_DST | ImageUsageFlags::TRANSFER_SRC,
         ));
-        
+
+        self.orig_image = Some(Image::new(
+            &renderer.device,
+            &mut renderer.allocator,
+            im.width(),
+            im.height(),
+            ImageUsageFlags::STORAGE | ImageUsageFlags::SAMPLED | ImageUsageFlags::TRANSFER_DST | ImageUsageFlags::TRANSFER_SRC,
+        ));
+
         self.draw_buffer = Some(Image::new(
             &renderer.device,
             &mut renderer.allocator,
@@ -343,6 +455,17 @@ impl RenderComponent for Editor {
 
         let mut command_buffer = renderer.create_command_buffer();
         command_buffer.begin();
+
+        renderer.transition_image(
+            &command_buffer,
+            self.orig_image.as_ref().unwrap().handle(),
+            ImageLayout::UNDEFINED,
+            ImageLayout::TRANSFER_DST_OPTIMAL,
+            PipelineStageFlags::TRANSFER,
+            PipelineStageFlags::TRANSFER,
+            AccessFlags::TRANSFER_READ,
+            AccessFlags::TRANSFER_WRITE,
+        );
 
         renderer.transition_image(
             &command_buffer,
@@ -408,9 +531,25 @@ impl RenderComponent for Editor {
             ImageLayout::TRANSFER_DST_OPTIMAL,
             &regions
         );
+        command_buffer.copy_buffer_to_image(
+            &buf,
+            self.orig_image.as_ref().unwrap(),
+            ImageLayout::TRANSFER_DST_OPTIMAL,
+            &regions
+        );
         renderer.transition_image(
             &command_buffer,
             self.image.as_ref().unwrap().handle(),
+            ImageLayout::TRANSFER_DST_OPTIMAL,
+            ImageLayout::GENERAL,
+            PipelineStageFlags::TRANSFER,
+            PipelineStageFlags::TRANSFER,
+            AccessFlags::TRANSFER_READ,
+            AccessFlags::TRANSFER_WRITE,
+        );
+        renderer.transition_image(
+            &command_buffer,
+            self.orig_image.as_ref().unwrap().handle(),
             ImageLayout::TRANSFER_DST_OPTIMAL,
             ImageLayout::GENERAL,
             PipelineStageFlags::TRANSFER,
@@ -429,12 +568,132 @@ impl RenderComponent for Editor {
             AccessFlags::TRANSFER_WRITE,
         );
         command_buffer.end();
-        renderer.submit_single_time_command_buffer(command_buffer, Box::new(|| {}));
+        renderer.submit_single_time_command_buffer(command_buffer);
     }
 
     fn render(&mut self, renderer: &mut Renderer, command_buffer: &mut CommandBuffer, swapchain_image: &ash::vk::Image, swapchain_image_view: &ImageView) {
 
-        if self.tab_viewer.as_ref().unwrap().pointer_released {
+        if self.tab_viewer.as_ref().unwrap().reset_image {
+            let width = self.image.as_ref().unwrap().width;
+            let height = self.image.as_ref().unwrap().height;
+            let regions = [
+                ImageCopy::default()
+                    .src_offset(Offset3D { x: 0, y: 0, z: 0 })
+                    .dst_offset(Offset3D { x: 0, y: 0, z: 0 })
+                    .extent(vk::Extent3D { width, height, depth: 1 })
+                    .src_subresource(ImageSubresourceLayers {
+                        aspect_mask: ImageAspectFlags::COLOR,
+                        mip_level: 0,
+                        base_array_layer: 0,
+                        layer_count: 1,
+                    })
+                    .dst_subresource(ImageSubresourceLayers {
+                        aspect_mask: ImageAspectFlags::COLOR,
+                        mip_level: 0,
+                        base_array_layer: 0,
+                        layer_count: 1,
+                    })
+            ];
+            command_buffer.copy_image(
+                self.orig_image.as_ref().unwrap(),
+                ImageLayout::GENERAL,
+                self.image.as_ref().unwrap(),
+                ImageLayout::GENERAL,
+                &regions
+            );
+
+            renderer.transition_image(
+                &command_buffer,
+                self.draw_buffer.as_ref().unwrap().handle(),
+                ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                ImageLayout::TRANSFER_DST_OPTIMAL,
+                PipelineStageFlags::TOP_OF_PIPE,
+                PipelineStageFlags::COMPUTE_SHADER,
+                AccessFlags::NONE,
+                AccessFlags::SHADER_WRITE,
+            );
+
+            command_buffer.copy_image(
+                self.orig_image.as_ref().unwrap(),
+                ImageLayout::GENERAL,
+                self.draw_buffer.as_ref().unwrap(),
+                ImageLayout::TRANSFER_DST_OPTIMAL,
+                &regions
+            );
+
+            renderer.transition_image(
+                &command_buffer,
+                self.draw_buffer.as_ref().unwrap().handle(),
+                ImageLayout::TRANSFER_DST_OPTIMAL,
+                ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                PipelineStageFlags::COMPUTE_SHADER,
+                PipelineStageFlags::BOTTOM_OF_PIPE,
+                AccessFlags::SHADER_WRITE,
+                AccessFlags::NONE,
+            );
+        }
+
+        if self.tab_viewer.as_ref().unwrap().export_image {
+            let width = self.image.as_ref().unwrap().width;
+            let height = self.image.as_ref().unwrap().height;
+            let mut buf = Buffer::new(
+                &renderer.device,
+                &mut renderer.allocator,
+                MemoryLocation::CpuToGpu,
+                (width * height * 4) as DeviceSize,
+                BufferUsageFlags::TRANSFER_SRC | BufferUsageFlags::TRANSFER_DST
+            );
+
+            let bufferimagecopy = [
+                BufferImageCopy::default()
+                    .buffer_offset(0)
+                    .buffer_row_length(width as u32)
+                    .buffer_image_height(height)
+                    .image_subresource(vk::ImageSubresourceLayers {
+                        aspect_mask: vk::ImageAspectFlags::COLOR,
+                        mip_level: 0,
+                        base_array_layer: 0,
+                        layer_count: 1,
+                    })
+                    .image_offset(vk::Offset3D { x: 0, y: 0, z: 0 })
+                    .image_extent(vk::Extent3D { width, height, depth: 1 })
+            ];
+
+            command_buffer.copy_image_to_buffer(
+                self.image.as_ref().unwrap(),
+                ImageLayout::GENERAL,
+                &buf,
+                &bufferimagecopy
+            );
+
+            renderer.add_command_buffer_callback(command_buffer.clone(), Box::new(move || {
+                let map = buf.mapped().unwrap();
+                let mut png = RgbaImage::from_raw(
+                    width,
+                    height,
+                    Vec::from(map.as_slice())
+                ).expect("Failed to map png buffer");
+
+                for pixel in png.pixels_mut() {
+                    for v in pixel.0.as_mut_slice() {
+                        let mut fv = *v as f32 / 255.0;
+                        fv = fv.powf(1.0 / 2.2);
+                        *v = (fv * 255.0) as u8;
+                    }
+                }
+
+                png.save(Path::new("output.png")).expect("Failed to save image");
+
+                println!("Saved png image");
+            }));
+        }
+
+        // Early exit for any non-drawing operations
+        if self.tab_viewer.as_ref().unwrap().compute {
+            return;
+        }
+
+        if self.tab_viewer.as_ref().unwrap().merge {
 
             // Clear brush stencil
 
@@ -497,10 +756,6 @@ impl RenderComponent for Editor {
             );
         }
 
-        if !self.tab_viewer.as_ref().unwrap().pointer_down || self.tab_viewer.as_ref().unwrap().space_down {
-            return;
-        }
-
         renderer.transition_image(
             &command_buffer,
             self.draw_buffer.as_ref().unwrap().handle(),
@@ -510,6 +765,42 @@ impl RenderComponent for Editor {
             PipelineStageFlags::COMPUTE_SHADER,
             AccessFlags::NONE,
             AccessFlags::SHADER_WRITE,
+        );
+
+        // Clear stencil
+        command_buffer.clear_color_image(
+            self.stencil_buffer.as_ref().unwrap(),
+            ImageLayout::GENERAL,
+            [0.0, 0.0, 0.0, 1.0]
+        );
+
+        // Clear the draw image
+        let width = self.image.as_ref().unwrap().width;
+        let height = self.image.as_ref().unwrap().height;
+        let regions = [
+            ImageCopy::default()
+                .src_offset(Offset3D { x: 0, y: 0, z: 0 })
+                .dst_offset(Offset3D { x: 0, y: 0, z: 0 })
+                .extent(vk::Extent3D { width, height, depth: 1 })
+                .src_subresource(ImageSubresourceLayers {
+                    aspect_mask: ImageAspectFlags::COLOR,
+                    mip_level: 0,
+                    base_array_layer: 0,
+                    layer_count: 1,
+                })
+                .dst_subresource(ImageSubresourceLayers {
+                    aspect_mask: ImageAspectFlags::COLOR,
+                    mip_level: 0,
+                    base_array_layer: 0,
+                    layer_count: 1,
+                })
+        ];
+        command_buffer.copy_image(
+            self.image.as_ref().unwrap(),
+            ImageLayout::GENERAL,
+            self.draw_buffer.as_ref().unwrap(),
+            ImageLayout::GENERAL,
+            &regions
         );
 
         let binding = renderer.pipeline_store().get(self.pipeline.unwrap());
@@ -529,7 +820,10 @@ impl RenderComponent for Editor {
         let push_constants = PushConstants {
             cursor_a: self.tab_viewer.as_ref().unwrap().image_pointer_prev,
             cursor_b: self.tab_viewer.as_ref().unwrap().image_pointer,
-            color: rgba
+            color: rgba,
+            weight_a: self.tab_viewer.as_ref().unwrap().weight_pos[0].to_vec2(),
+            weight_b: self.tab_viewer.as_ref().unwrap().weight_pos[1].to_vec2(),
+            shader_tool: self.tab_viewer.as_ref().unwrap().shader_tool
         };
         command_buffer.push_constants(pipeline, ShaderStageFlags::COMPUTE, 0, &bytemuck::cast_slice(std::slice::from_ref(&push_constants)));
 
