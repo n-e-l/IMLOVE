@@ -1,5 +1,5 @@
 # Direnv
-.direnv/bin/
+.direnv/
 
 # Project files
 .idea/
